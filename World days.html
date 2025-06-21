@@ -91,20 +91,27 @@
         zones[tz] = { fmt, holidays: [] };
         zoneOrder.push(tz);
 
-        if (tzToCountry[tz]) {
-          fetch(`https://date.nager.at/api/v3/PublicHolidays/${new Date().getFullYear()}/${tzToCountry[tz]}`)
-            .then(res => res.json())
-            .then(data => {
-              zones[tz].holidays = data.map(d => d.date.substring(5)); // MM-DD
-            });
-        }
-
         const id = 'box_' + tz.replace(/[^A-Za-z0-9]/g, '_');
         const box = document.createElement('div');
         box.id = id;
         box.className = 'clock-box';
         box.innerHTML = `<h4>${tz}</h4><div class="time">読み込み中...</div>`;
         panel.appendChild(box);
+
+        if (tzToCountry[tz]) {
+          fetch(`https://date.nager.at/api/v3/PublicHolidays/${new Date().getFullYear()}/${tzToCountry[tz]}`)
+            .then(res => {
+              if (!res.ok) throw new Error('祝日データ取得失敗');
+              return res.json();
+            })
+            .then(data => {
+              zones[tz].holidays = data.map(d => d.date.substring(5));
+            })
+            .catch(err => {
+              console.warn(`祝日データ取得エラー(${tz}):`, err.message);
+              zones[tz].holidays = [];
+            });
+        }
 
         updateClocks();
       });
@@ -124,7 +131,7 @@
           const dayClass = weekdayClasses[['日','月','火','水','木','金','土'].indexOf(wjp)] || '';
           box.className = 'clock-box ' + dayClass;
           timeEl.textContent = `${p.year}年${p.month}月${p.day}日(${p.weekday}) ${p.hour}時${p.minute}分`;
-          if (isHoliday) timeEl.classList.add('holiday'); else timeEl.classList.remove('holiday');
+          timeEl.classList.toggle('holiday', isHoliday);
         }
       }
 
