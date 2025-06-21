@@ -2,13 +2,14 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>地図UI付きワールドクロック（geo-tz UMD版 修正）</title>
+  <title>地図UI付きワールドクロック（動作確認版）</title>
+  <!-- Leaflet CSS -->
   <link
     rel="stylesheet"
     href="https://unpkg.com/leaflet/dist/leaflet.css"
   />
   <style>
-    html, body { margin:0; padding:0; height:100% }
+    html,body { margin:0; padding:0; height:100% }
     body { display:flex; flex-direction:column }
     #map { flex:1 }
     #panel {
@@ -19,17 +20,9 @@
       border-top:1px solid #ccc;
       font-family:sans-serif;
     }
-    .clock-box {
-      display:inline-block;
-      width:180px;
-      margin:0.3rem;
-      padding:0.4rem;
-      background:#fff;
-      border:1px solid #ddd;
-      border-radius:4px;
-      text-align:center;
-      font-family:sans-serif;
-    }
+    .clock-box { display:inline-block; width:180px; margin:0.3rem; padding:0.4rem;
+                 background:#fff; border:1px solid #ddd; border-radius:4px;
+                 text-align:center; font-family:sans-serif; }
     .clock-box h4 { margin:0 0 .2em; font-size:0.9rem }
     .time { font-size:1.2rem }
     .sun .time { color:#e74c3c }
@@ -49,18 +42,20 @@
     <em>地図をクリックしてタイムゾーンを追加してください。</em>
   </div>
 
-  <!-- Leaflet JS -->
+  <!-- 1) Leaflet本体 -->
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <!-- 2) geo-tz UMD版 -->
   <script src="https://cdn.jsdelivr.net/npm/geo-tz@6.2.0/dist/geo-tz.umd.min.js"></script>
-
+  <!-- 3) アプリ本体 -->
   <script>
   (function(){
-    console.log('geoTz:', typeof geoTz);  // <-- geoTz が "function" になっているか確認
+    console.log('L:', typeof L);         // → "object"
+    console.log('geoTz:', typeof geoTz); // → "function"
+
     const WEEK_JP   = ['日','月','火','水','木','金','土'];
     const WEEK_CLS  = ['sun','mon','tue','wed','thu','fri','sat'];
     const panel     = document.getElementById('panel');
     const zones     = {};
-
-    // 祝日API用 ISO国コード
     const TZ2CC = {
       'Asia/Tokyo':       'JP',
       'Asia/Kolkata':     'IN',
@@ -68,11 +63,9 @@
       'America/New_York': 'US'
     };
 
-    // Leaflet map 初期化
-    const map = L.map('map', {
-      center: [20,0], zoom:2, attributionControl:false
-    });
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    // 地図初期化
+    const map = L.map('map',{ center:[20,0], zoom:2, attributionControl:false });
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
       maxZoom:5, minZoom:1
     }).addTo(map);
 
@@ -85,31 +78,23 @@
       const tz = tzas[0];
       if (zones[tz]) return;
 
-      const off = Intl.DateTimeFormat('en', {
-        timeZone: tz, timeZoneName: 'short'
-      }).format(new Date()).split(' ').pop();
-
-      const fmt = new Intl.DateTimeFormat('ja-JP', {
-        timeZone: tz,
-        year:    'numeric',
-        month:   'numeric',
-        day:     'numeric',
-        hour:    'numeric',
-        minute:  'numeric',
-        weekday: 'short'
+      // オフセットとフォーマッタ
+      const off = Intl.DateTimeFormat('en',{ timeZone:tz, timeZoneName:'short' })
+                   .format(new Date()).split(' ').pop();
+      const fmt = new Intl.DateTimeFormat('ja-JP',{
+        timeZone:tz, year:'numeric', month:'numeric', day:'numeric',
+        hour:'numeric', minute:'numeric', weekday:'short'
       });
 
+      // 祝日取得
       let holidays = null;
-      const cc = TZ2CC[tz];
-      if (cc) {
+      if (TZ2CC[tz]) {
         try {
-          const year = new Date().getFullYear();
-          const res  = await fetch(
-            `https://date.nager.at/api/v3/PublicHolidays/${year}/${cc}`
+          const res = await fetch(
+            `https://date.nager.at/api/v3/PublicHolidays/${new Date().getFullYear()}/${TZ2CC[tz]}`
           );
           if (res.ok) {
-            const arr = await res.json();
-            holidays = arr.map(h => {
+            holidays = (await res.json()).map(h => {
               const d = new Date(h.date);
               return String(d.getMonth()+1).padStart(2,'0')
                    + '-' + String(d.getDate()).padStart(2,'0');
@@ -120,11 +105,13 @@
 
       zones[tz] = { fmt, holidays };
 
-      L.marker([e.latlng.lat, e.latlng.lng])
+      // マーカー＋ポップアップ
+      L.marker([e.latlng.lat,e.latlng.lng])
        .addTo(map)
        .bindPopup(`<b>${tz}</b><br>${off}`)
        .openPopup();
 
+      // 時計ボックス追加
       const id = 'box_' + tz.replace(/[^A-Za-z0-9]/g,'_');
       const box = document.createElement('div');
       box.id = id;
@@ -138,23 +125,20 @@
     let last = {};
     function updateAll(force){
       const now = new Date();
-      for (const [tz, z] of Object.entries(zones)) {
+      for (const [tz,z] of Object.entries(zones)) {
         const parts = z.fmt.formatToParts(now);
-        const p = {}; parts.forEach(o => p[o.type] = o.value);
-        const text =
+        const p = {}; parts.forEach(o=>p[o.type]=o.value);
+        const txt =
           `${p.year}年${p.month}月${p.day}日(${p.weekday}) `
           + `${p.hour}時${p.minute}分`;
-        if (force || last[tz] !== text) {
-          last[tz] = text;
-          const box    = document.getElementById(
+        if (force || last[tz]!==txt) {
+          last[tz] = txt;
+          const box = document.getElementById(
             'box_' + tz.replace(/[^A-Za-z0-9]/g,'_')
           );
           const timeEl = box.querySelector('.time');
-          timeEl.textContent = text;
-
-          const wd = WEEK_JP.indexOf(p.weekday);
-          box.className = 'clock-box ' + WEEK_CLS[wd];
-
+          timeEl.textContent = txt;
+          box.className = 'clock-box ' + WEEK_CLS[WEEK_JP.indexOf(p.weekday)];
           if (z.holidays) {
             const mmdd = p.month.padStart(2,'0') + '-' + p.day.padStart(2,'0');
             timeEl.classList.toggle('holiday', z.holidays.includes(mmdd));
@@ -163,7 +147,7 @@
       }
     }
 
-    setInterval(() => updateAll(false), 1000);
+    setInterval(()=>updateAll(false), 1000);
   })();
   </script>
 </body>
