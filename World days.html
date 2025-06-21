@@ -2,14 +2,10 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>地図UI付きワールドクロック（動作確認版）</title>
-  <!-- Leaflet CSS -->
-  <link
-    rel="stylesheet"
-    href="https://unpkg.com/leaflet/dist/leaflet.css"
-  />
+  <title>地図UI付きワールドクロック（修正版）</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <style>
-    html,body { margin:0; padding:0; height:100% }
+    html, body { margin:0; padding:0; height:100% }
     body { display:flex; flex-direction:column }
     #map { flex:1 }
     #panel {
@@ -33,122 +29,138 @@
     .fri .time { color:#e67e22 }
     .sat .time { color:#1abc9c }
     .holiday { font-weight:bold; }
+    .error { color: #e74c3c; font-size: 0.9rem; }
+    .debug { margin-top: 10px; font-size: 0.8rem; color: #666; }
   </style>
 </head>
 <body>
-
   <div id="map"></div>
   <div id="panel">
     <em>地図をクリックしてタイムゾーンを追加してください。</em>
+    <div class="debug" id="debug">ライブラリ読み込み状況を確認中...</div>
   </div>
 
-  <!-- 1) Leaflet本体 -->
-  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-  <!-- 2) geo-tz UMD版 -->
-  <script src="https://cdn.jsdelivr.net/npm/browser-geo-tz@0.1.0/dist/geotz.js"></script>
-  <!-- 3) アプリ本体 -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
-  (function(){
-    console.log('L:', typeof L);         // → "object"
-    console.log('geoTz:', typeof geoTz); // → "function"
-
-    const WEEK_JP   = ['日','月','火','水','木','金','土'];
-    const WEEK_CLS  = ['sun','mon','tue','wed','thu','fri','sat'];
-    const panel     = document.getElementById('panel');
-    const zones     = {};
-    const TZ2CC = {
-      'Asia/Tokyo':       'JP',
-      'Asia/Kolkata':     'IN',
-      'Africa/Cairo':     'EG',
-      'America/New_York': 'US'
-    };
-
-    // 地図初期化
-    const map = L.map('map',{ center:[20,0], zoom:2, attributionControl:false });
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
-      maxZoom:5, minZoom:1
-    }).addTo(map);
-
-    map.on('click', async e => {
-      if (typeof geoTz !== 'function') {
-        return console.error('geoTz が未定義です');
-      }
-      const tzas = geoTz(e.latlng.lat, e.latlng.lng);
-      if (!tzas || !tzas.length) return;
-      const tz = tzas[0];
-      if (zones[tz]) return;
-
-      // オフセットとフォーマッタ
-      const off = Intl.DateTimeFormat('en',{ timeZone:tz, timeZoneName:'short' })
-                   .format(new Date()).split(' ').pop();
-      const fmt = new Intl.DateTimeFormat('ja-JP',{
-        timeZone:tz, year:'numeric', month:'numeric', day:'numeric',
-        hour:'numeric', minute:'numeric', weekday:'short'
-      });
-
-      // 祝日取得
-      let holidays = null;
-      if (TZ2CC[tz]) {
-        try {
-          const res = await fetch(
-            `https://date.nager.at/api/v3/PublicHolidays/${new Date().getFullYear()}/${TZ2CC[tz]}`
-          );
-          if (res.ok) {
-            holidays = (await res.json()).map(h => {
-              const d = new Date(h.date);
-              return String(d.getMonth()+1).padStart(2,'0')
-                   + '-' + String(d.getDate()).padStart(2,'0');
-            });
-          }
-        } catch {}
-      }
-
-      zones[tz] = { fmt, holidays };
-
-      // マーカー＋ポップアップ
-      L.marker([e.latlng.lat,e.latlng.lng])
-       .addTo(map)
-       .bindPopup(`<b>${tz}</b><br>${off}`)
-       .openPopup();
-
-      // 時計ボックス追加
-      const id = 'box_' + tz.replace(/[^A-Za-z0-9]/g,'_');
-      const box = document.createElement('div');
-      box.id = id;
-      box.className = 'clock-box';
-      box.innerHTML = `<h4>${tz} (${off})</h4><div class="time">読み込み中…</div>`;
-      panel.appendChild(box);
-
-      updateAll(true);
+    if (typeof L === 'undefined') {
+      const script = document.createElement('script');
+      script.src = "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js";
+      document.head.appendChild(script);
+    }
+  </script>
+  <script>
+    document.addEventListener("DOMContentLoaded", () => {
+      setTimeout(initApp, 100);
     });
 
-    let last = {};
-    function updateAll(force){
-      const now = new Date();
-      for (const [tz,z] of Object.entries(zones)) {
-        const parts = z.fmt.formatToParts(now);
-        const p = {}; parts.forEach(o=>p[o.type]=o.value);
-        const txt =
-          `${p.year}年${p.month}月${p.day}日(${p.weekday}) `
-          + `${p.hour}時${p.minute}分`;
-        if (force || last[tz]!==txt) {
-          last[tz] = txt;
-          const box = document.getElementById(
-            'box_' + tz.replace(/[^A-Za-z0-9]/g,'_')
-          );
+    function initApp() {
+      const debugEl = document.getElementById('debug');
+
+      const WEEK_JP = ['日','月','火','水','木','金','土'];
+      const WEEK_CLS = ['sun','mon','tue','wed','thu','fri','sat'];
+      const panel = document.getElementById('panel');
+      const zones = {};
+      const TZ2CC = {
+        'Asia/Tokyo': 'JP', 'Asia/Kolkata': 'IN', 'Africa/Cairo': 'EG',
+        'America/New_York': 'US', 'Europe/London': 'GB', 'Europe/Paris': 'FR',
+        'Asia/Shanghai': 'CN', 'America/Los_Angeles': 'US',
+        'America/Sao_Paulo': 'BR', 'Australia/Sydney': 'AU',
+        'America/Chicago': 'US', 'America/Denver': 'US',
+        'Asia/Dubai': 'AE', 'Asia/Bangkok': 'TH'
+      };
+
+      const map = L.map('map', {
+        center: [20, 0],
+        zoom: 2
+      });
+
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 18,
+        attribution: '© OpenStreetMap'
+      }).addTo(map);
+
+      map.on('click', async function(e) {
+        const tz = fallbackGetTimezone(e.latlng.lat, e.latlng.lng)[0];
+        if (zones[tz]) return;
+
+        try {
+          new Intl.DateTimeFormat('ja-JP', { timeZone: tz }).format(new Date());
+        } catch {
+          console.error('無効なタイムゾーン:', tz);
+          return;
+        }
+
+        const fmt = new Intl.DateTimeFormat('ja-JP', {
+          timeZone: tz, year: 'numeric', month: 'numeric', day: 'numeric',
+          hour: 'numeric', minute: 'numeric', weekday: 'short'
+        });
+
+        zones[tz] = { fmt: fmt, holidays: [] };
+
+        if (TZ2CC[tz]) {
+          try {
+            const res = await fetch(`https://date.nager.at/api/v3/PublicHolidays/${new Date().getFullYear()}/${TZ2CC[tz]}`);
+            const data = await res.json();
+            zones[tz].holidays = data.map(h => {
+              const d = new Date(h.date);
+              return String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+            });
+          } catch (e) {
+            console.warn('祝日取得エラー:', e);
+          }
+        }
+
+        const boxId = 'box_' + tz.replace(/[^A-Za-z0-9]/g, '_');
+        const box = document.createElement('div');
+        box.id = boxId;
+        box.className = 'clock-box';
+        box.innerHTML = `<h4>${tz}</h4><div class="time">読み込み中...</div>`;
+        panel.appendChild(box);
+        updateAll(true);
+      });
+
+      function updateAll(force) {
+        const now = new Date();
+        for (const tz in zones) {
+          const z = zones[tz];
+          const parts = z.fmt.formatToParts(now);
+          const p = {};
+          parts.forEach(part => p[part.type] = part.value);
+
+          const dateStr = `${p.year}年${p.month}月${p.day}日(${p.weekday}) ${p.hour}時${p.minute}分`;
+
+          const box = document.getElementById('box_' + tz.replace(/[^A-Za-z0-9]/g, '_'));
           const timeEl = box.querySelector('.time');
-          timeEl.textContent = txt;
-          box.className = 'clock-box ' + WEEK_CLS[WEEK_JP.indexOf(p.weekday)];
-          if (z.holidays) {
-            const mmdd = p.month.padStart(2,'0') + '-' + p.day.padStart(2,'0');
-            timeEl.classList.toggle('holiday', z.holidays.includes(mmdd));
+          timeEl.textContent = dateStr;
+
+          const weekdayIndex = WEEK_JP.indexOf(p.weekday);
+          box.className = 'clock-box ' + (weekdayIndex >= 0 ? WEEK_CLS[weekdayIndex] : '');
+
+          const mmdd = String(p.month).padStart(2, '0') + '-' + String(p.day).padStart(2, '0');
+          if (Array.isArray(z.holidays) && z.holidays.includes(mmdd)) {
+            timeEl.classList.add('holiday');
+          } else {
+            timeEl.classList.remove('holiday');
           }
         }
       }
-    }
 
-    setInterval(()=>updateAll(false), 1000);
-  })();
+      setInterval(() => updateAll(false), 1000);
+
+      function fallbackGetTimezone(lat, lng) {
+        const utcOffset = Math.round(lng / 15);
+        const offsetToTz = {
+          '-9': 'America/Anchorage', '-8': 'America/Los_Angeles', '-5': 'America/New_York',
+          '0': 'Europe/London', '1': 'Europe/Paris', '2': 'Europe/Cairo',
+          '3': 'Europe/Moscow', '4': 'Asia/Dubai', '5': 'Asia/Karachi',
+          '6': 'Asia/Dhaka', '7': 'Asia/Bangkok', '8': 'Asia/Shanghai',
+          '9': 'Asia/Tokyo', '10': 'Australia/Sydney'
+        };
+        return [offsetToTz[utcOffset.toString()] || 'UTC'];
+      }
+
+      debugEl.textContent = '✅ Leaflet 読み込み成功。クリックで時計追加。';
+    }
   </script>
 </body>
 </html>
