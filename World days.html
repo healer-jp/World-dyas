@@ -2,8 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>地図UI付きワールドクロック（geo-tz UMD版）</title>
-  <!-- Leaflet CSS -->
+  <title>地図UI付きワールドクロック（geo-tz UMD版 修正）</title>
   <link
     rel="stylesheet"
     href="https://unpkg.com/leaflet/dist/leaflet.css"
@@ -52,16 +51,17 @@
 
   <!-- Leaflet JS -->
   <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-  <!-- geo-tz UMD ビルド -->
-  <script src="https://cdn.jsdelivr.net/npm/geo-tz@6.2.0/dist/geo-tz.umd.min.js"></script>
+  <!-- geo-tz UMD を unpkg から読み込み -->
+  <script src="https://unpkg.com/geo-tz/dist/geo-tz.umd.min.js"></script>
   <script>
   (function(){
+    console.log('geoTz:', typeof geoTz);  // <-- geoTz が "function" になっているか確認
     const WEEK_JP   = ['日','月','火','水','木','金','土'];
     const WEEK_CLS  = ['sun','mon','tue','wed','thu','fri','sat'];
     const panel     = document.getElementById('panel');
     const zones     = {};
 
-    // 祝日API用の ISO 国コードマップ
+    // 祝日API用 ISO国コード
     const TZ2CC = {
       'Asia/Tokyo':       'JP',
       'Asia/Kolkata':     'IN',
@@ -69,7 +69,7 @@
       'America/New_York': 'US'
     };
 
-    // Leaflet マップ初期化
+    // Leaflet map 初期化
     const map = L.map('map', {
       center: [20,0], zoom:2, attributionControl:false
     });
@@ -77,20 +77,19 @@
       maxZoom:5, minZoom:1
     }).addTo(map);
 
-    // 地図クリックでタイムゾーン追加
     map.on('click', async e => {
-      // geoTz は UMD 版でグローバルに定義されています
+      if (typeof geoTz !== 'function') {
+        return console.error('geoTz が未定義です');
+      }
       const tzas = geoTz(e.latlng.lat, e.latlng.lng);
       if (!tzas || !tzas.length) return;
       const tz = tzas[0];
-      if (zones[tz]) return;  // すでに追加済み
+      if (zones[tz]) return;
 
-      // GMTオフセット（例: GMT+9）
       const off = Intl.DateTimeFormat('en', {
         timeZone: tz, timeZoneName: 'short'
       }).format(new Date()).split(' ').pop();
 
-      // Intlフォーマッタ
       const fmt = new Intl.DateTimeFormat('ja-JP', {
         timeZone: tz,
         year:    'numeric',
@@ -101,7 +100,6 @@
         weekday: 'short'
       });
 
-      // 祝日取得（Nager.Date API）
       let holidays = null;
       const cc = TZ2CC[tz];
       if (cc) {
@@ -123,13 +121,11 @@
 
       zones[tz] = { fmt, holidays };
 
-      // マーカー＋ポップアップでフィードバック
       L.marker([e.latlng.lat, e.latlng.lng])
        .addTo(map)
        .bindPopup(`<b>${tz}</b><br>${off}`)
        .openPopup();
 
-      // 時計ボックスを追加
       const id = 'box_' + tz.replace(/[^A-Za-z0-9]/g,'_');
       const box = document.createElement('div');
       box.id = id;
@@ -149,7 +145,6 @@
         const text =
           `${p.year}年${p.month}月${p.day}日(${p.weekday}) `
           + `${p.hour}時${p.minute}分`;
-
         if (force || last[tz] !== text) {
           last[tz] = text;
           const box    = document.getElementById(
@@ -158,11 +153,9 @@
           const timeEl = box.querySelector('.time');
           timeEl.textContent = text;
 
-          // 曜日でクラス切替
           const wd = WEEK_JP.indexOf(p.weekday);
           box.className = 'clock-box ' + WEEK_CLS[wd];
 
-          // 祝日ハイライト
           if (z.holidays) {
             const mmdd = p.month.padStart(2,'0') + '-' + p.day.padStart(2,'0');
             timeEl.classList.toggle('holiday', z.holidays.includes(mmdd));
@@ -171,7 +164,6 @@
       }
     }
 
-    // 1秒ごとに更新
     setInterval(() => updateAll(false), 1000);
   })();
   </script>
